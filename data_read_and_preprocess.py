@@ -124,7 +124,7 @@ class MyDataLoader(DataLoader):
 
 if __name__ == "__main__":
 
-    dir = "/nfs/adas_s3_dataset/public/xiawenze/data/cats_and_dogs_filtered/train"
+    dir = "./cats_and_dogs_filtered/train"
     my_dataset = MyDataset(dir, 128)
     my_loader = MyDataLoader(dataset=my_dataset, batch_size=16, shuffle=True, num_workers=4)
 
