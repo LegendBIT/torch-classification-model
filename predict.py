@@ -20,12 +20,12 @@ def resize_padding(image, target_length, value=0):
 transform=transforms.Compose([transforms.ToTensor(), transforms.Normalize(mean=[0.5], std=[0.5])])
 
 # 读取图片并预处理
-image = resize_padding(Image.open("/nfs/cache-902-2/xiawenze/tmp/mobilenetv2_torch/images/car_1.jpg"), 128)
+image = resize_padding(Image.open("./images/car_1.jpg"), 128)
 image = transform(image)
 image = image.reshape(1, 3, 128, 128)
 
 # 读取模型
-model = torch.load("/nfs/cache-902-2/xiawenze/tmp/mobilenetv2_torch/tmp/D2city_BDD_ZJC_mobilenetv2-v0.1_20220120-2156_128_1.0_9_0.8886_0.8856.pth")
+model = torch.load("./mobilenetv2-v0.1_20220120-2156_128_1.0_9_0.8886_0.8856.pth")
 # print(model)
 
 # 单张图片推理
@@ -36,6 +36,6 @@ with torch.no_grad():
     predict_cla = torch.argmax(predict).numpy()
 
 # 输出结果
-label = ["background", "bus", "car", "person", "rider", "truck", "two-wheeled"]
+label = ["C1", "C2", "C3", "C4", "C5", "C6", "C7"]
 print(predict[predict_cla])
 print(label[predict_cla])
