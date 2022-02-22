@@ -112,4 +112,4 @@ class MobileNetV2(nn.Module):
         x = self.avgpool(x)
         x = torch.flatten(x, 1)  # 类比view()是改变维度，torch.flatten(input, start_dim=0, end_dim=-1) 是拉伸维度
         x = self.classifier(x)   # torch.transpose(input, dim0, dim1)是交换维度
-        return x
+        return x    # 最后的输出层并不包含激活函数，直接就是全链接的输出，在损失函数中包含softmax操作，实际使用需要自己再加一个softmax
