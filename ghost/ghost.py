@@ -206,7 +206,7 @@ class GhostNet(nn.Module):
         x = x.view(x.size(0), -1)
         if self.dropout > 0.:
             x = F.dropout(x, p=self.dropout, training=self.training)
-        x = self.classifier(x)
+        x = self.classifier(x)    # 最后的输出层并不包含激活函数，直接就是全链接的输出，在损失函数中包含softmax操作，实际使用需要自己再加一个softmax
         return x
 
 
