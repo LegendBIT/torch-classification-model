@@ -49,7 +49,7 @@ model.to(device)
 ############################################################################################################
 ## 3. 定义损失函数，日志记录器和模型保存函数 ######################################################################
 ############################################################################################################
-cost = torch.nn.CrossEntropyLoss()
+cost = torch.nn.CrossEntropyLoss()     # 该损失函数包含softmax操作，所以对应模型中最后一层不含有softmax操作
 tensorboard_path = "./log"
 if os.path.exists(tensorboard_path): shutil.rmtree(tensorboard_path)
 writer = SummaryWriter(tensorboard_path)
@@ -57,7 +57,7 @@ writer = SummaryWriter(tensorboard_path)
 def save_model(epoch, acc1, acc2, path, dataset_name, model, alpha):
     localtime = time.strftime("%Y%m%d-%H%M", time.localtime())
     output_model = path + "{}_ghost-v0.1_{}_{}_{}_{}_{:.4f}_{:.4f}.pth".format(dataset_name, localtime, IMG_SIZE, alpha, epoch, acc1, acc2)
-    torch.save(model, output_model)
+    torch.save(model, output_model)    # 该保存方式理论上保存了完整的结构和参数，但是实际load时，还是需要同级目录下有模型结构定义脚本
 
 ############################################################################################################
 ## 4. 定义训练函数和测试函数 ###################################################################################
