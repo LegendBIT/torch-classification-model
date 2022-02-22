@@ -203,7 +203,7 @@ class MobileNetV3(nn.Module):
         x = self.features(x)
         x = self.avgpool(x)
         x = torch.flatten(x, 1)
-        x = self.classifier(x)
+        x = self.classifier(x)    # 最后的输出层并不包含激活函数，直接就是全链接的输出，在损失函数中包含softmax操作，实际使用需要自己再加一个softmax
 
         return x
 
