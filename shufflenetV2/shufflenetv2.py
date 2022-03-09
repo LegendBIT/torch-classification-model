@@ -170,7 +170,7 @@ def shufflenet_v2_x1_0(**kwargs: Any) -> ShuffleNetV2:
     return _shufflenetv2([4, 8, 4], [24, 116, 232, 464, 1024], **kwargs)
 
 
-def shufflenet_v2_x1_5(progress: bool = True, **kwargs: Any) -> ShuffleNetV2:
+def shufflenet_v2_x1_5(**kwargs: Any) -> ShuffleNetV2:
     """
     Constructs a ShuffleNetV2 with 1.5x output channels, as described in
     `"ShuffleNet V2: Practical Guidelines for Efficient CNN Architecture Design"
@@ -179,7 +179,7 @@ def shufflenet_v2_x1_5(progress: bool = True, **kwargs: Any) -> ShuffleNetV2:
         pretrained (bool): If True, returns a model pre-trained on ImageNet
         progress (bool): If True, displays a progress bar of the download to stderr
     """
-    return _shufflenetv2(progress, [4, 8, 4], [24, 176, 352, 704, 1024], **kwargs)
+    return _shufflenetv2([4, 8, 4], [24, 176, 352, 704, 1024], **kwargs)
 
 
 def shufflenet_v2_x2_0(**kwargs: Any) -> ShuffleNetV2:
