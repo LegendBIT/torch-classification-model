@@ -9,6 +9,9 @@
 ## ghost
 实现了基于torch的ghost模型的定义
 
+## shufflenetV2
+实现了基于torch的shufflenetV2模型的定义
+
 ## train.py是公共训练函数
 
 ## validate.py是公共测试函数
