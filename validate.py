@@ -3,6 +3,8 @@ import time
 import logging
 import numpy as np
 from collections import OrderedDict
+from sklearn.metrics import confusion_matrix
+import matplotlib.pyplot as plt
 import torch
 import torch.nn as nn
 from data_read_and_preprocess import MyDataset, MyDataLoader
@@ -13,11 +15,11 @@ logging.basicConfig(level=logging.NOTSET)
 def main():
 
     # 初始化
-    IMG_SIZE = 128
-    BATCH_SIZE = 32
+    IMG_SIZE = 48
+    BATCH_SIZE = 128
     num_gpu = 1
-    test_dir = "./cats_and_dogs_filtered/validation"
-    weight_path = "./x.pth"
+    test_dir = "./test.txt"
+    weight_path = "./checkpoint/pth/TSR_JUSHI_8_mobilenetv3large-v0.1_20220309-1417_48_1.0_57_0.9998_0.9791.pth"
 
     # 读取模型
     model = torch.load(weight_path)
@@ -44,7 +46,7 @@ def validate(model, loader, loss_fn, log_suffix=''):
     batch_time_m = AverageMeter()
     losses_m = AverageMeter()
     top1_m = AverageMeter()
-    top5_m = AverageMeter()
+    top2_m = AverageMeter()
     prec_recall = PrecAndRecall(loader.dataset.class_names)
     # 设定为推理模式
     model.eval()
@@ -57,11 +59,11 @@ def validate(model, loader, loss_fn, log_suffix=''):
             input, target = input.cuda(), target.cuda()
             output = model(input)
             loss = loss_fn(output, target)
-            acc1, acc5 = accuracy(output, target, topk=(1, 2))
+            acc1, acc2 = accuracy(output, target, topk=(1, 2))
 
             losses_m.update(loss.item(), input.size(0))     # tensor.item()会自动将数据从GPU移动到CPU
             top1_m.update(acc1.item(), output.size(0))
-            top5_m.update(acc5.item(), output.size(0))
+            top2_m.update(acc2.item(), output.size(0))
             prec_recall.update(output, target, output.size(0))
 
             torch.cuda.synchronize()                  # torch是异步调用机制，所以需要同步统计pytorch调用cuda运行时间
@@ -75,11 +77,12 @@ def validate(model, loader, loss_fn, log_suffix=''):
                     'Time: {batch_time.val:.3f} ({batch_time.avg:.3f})  '
                     'Loss: {loss.val:>7.4f} ({loss.avg:>6.4f})  '
                     'Acc@1: {top1.val:>7.4f} ({top1.avg:>7.4f})  '
-                    'Acc@5: {top5.val:>7.4f} ({top5.avg:>7.4f})'.format(
-                        log_name, batch_idx, last_idx, batch_time=batch_time_m, loss=losses_m, top1=top1_m, top5=top5_m))
+                    'Acc@2: {top2.val:>7.4f} ({top2.avg:>7.4f})'.format(
+                        log_name, batch_idx, last_idx, batch_time=batch_time_m, loss=losses_m, top1=top1_m, top2=top2_m))
 
-    metrics = OrderedDict([('loss', losses_m.avg), ('top1', top1_m.avg), ('top5', top5_m.avg)])
+    metrics = OrderedDict([('loss', losses_m.avg), ('top1', top1_m.avg), ('top2', top2_m.avg)])
     prec_recall.result()
+    prec_recall.drawImage()
 
     return metrics
 
@@ -158,6 +161,67 @@ class PrecAndRecall(object):
         # 打印混淆矩阵
         print(self.label_name)
         print(np.array(self.num_mat))
+
+    def drawImage(self, image_name='./confusion_matrix.png'):
+        # 绘制的接口，外部仅需要输入label_true，label_pred，label_name
+        y_true = np.array(self.label_true)
+        y_pred = np.array(self.label_pred)
+        labels = self.label_name
+
+        # 计算混淆矩阵
+        cm = confusion_matrix(y_true, y_pred)                        # 矩阵原数
+        np.seterr(divide='ignore',invalid='ignore')                  # 防止分母为零
+        cm_rec = cm.astype('float') / cm.sum(axis=1)[:, np.newaxis]  # 召回率矩阵
+        cm_prs = cm.astype('float') / cm.sum(axis=0)[np.newaxis, :]  # 正确率矩阵
+
+        # 设置打印属性，保留两位小数，打印原数矩阵
+        np.set_printoptions(precision=2)
+        # print(cm)
+
+        # 设置plt基本属性
+        plt.rcParams['font.family'] = 'Times New Roman'
+        plt.rcParams['font.size'] = 16
+        plt.rcParams['font.weight'] = 'bold'
+        font1 = {'family':'Times New Roman', 'style':'normal', 'weight':'bold', 'color':'red', 'size':16}
+        font2 = {'family':'Times New Roman', 'style':'normal', 'weight':'bold', 'color':'black', 'size':16}
+
+        # 创建画板和绘图
+        plt.set_loglevel("info") 
+        plt.figure(figsize=(12, 10), dpi=150)
+        plt.imshow(cm, interpolation='nearest', cmap="Greens")
+        plt.colorbar()
+
+        # 向图中每个格子中填入具体数字
+        ind_array = np.arange(len(labels))
+        x, y = np.meshgrid(ind_array, ind_array)
+        for x_val, y_val in zip(x.flatten(), y.flatten()):
+            c = cm[y_val][x_val]
+            plt.text(x_val, y_val, "%d" % (c,), color='red', va='center', ha='center')
+
+        # 设置图片框、留白、分割线等属性
+        x_tick_marks = np.array(range(len(labels))) + 0.5
+        y_tick_marks = np.array(range(len(labels))) + 0.5
+        plt.gca().set_xticks(x_tick_marks, minor=True)
+        plt.gca().set_yticks(y_tick_marks, minor=True)
+        plt.gca().xaxis.set_ticks_position('none')
+        plt.gca().yaxis.set_ticks_position('none')
+        plt.gcf().subplots_adjust(bottom=0.3)  # 页面留白，数值太小的话，页面下面的标签显示不全
+        plt.grid(True, which='minor', linestyle='-')
+
+        # 设置图片周围的各种辅助文字
+        xlocations = np.array(range(len(labels)))
+        xlabels = [label + " (" + str((cm_prs[i][i]*100//1)/100) + ")" for i, label in enumerate(labels)]
+        ylocations = np.array(range(len(labels)))
+        ylabels = [label + " (" + str((cm_rec[i][i]*100//1)/100) + ")" for i, label in enumerate(labels)]
+        plt.xticks(xlocations, xlabels, rotation=60)
+        plt.yticks(ylocations, ylabels)
+        plt.xlabel('Predicted label', fontdict=font2)
+        plt.ylabel('True label', fontdict=font2)
+        plt.title('Confusion Matrix', fontdict=font2)
+
+        # 保存图片和展示图片
+        plt.savefig(image_name, format='png')
+        plt.show()
 
 
 
