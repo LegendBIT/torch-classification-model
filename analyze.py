@@ -14,7 +14,7 @@ def get_images(txt_path):
     with open(txt_path, 'r', encoding='utf-8') as f:
         dataset_info = f.readlines()
     images_info_list = list(map(lambda x:re.split(r"[ ]+", x.strip()), dataset_info[1:]))
-    images_labels = dataset_info[0].strip().split(' ')[:-2]
+    images_labels = dataset_info[0].strip().split(' ')
     print("<-- Loading end...（total num = %d）" % len(images_info_list))
     return images_info_list, images_labels
 
@@ -32,9 +32,10 @@ def resize_padding(image, target_length, value=0):
 
 # 处理单张图片
 def proc_images(image_path, transform):
-    image = resize_padding(Image.open(image_path), 128)
+    # image = resize_padding(Image.open(image_path), 128)
+    image = Image.open(image_path)
     image = transform(image)
-    image = image.reshape(1, 3, 128, 128)
+    image = image.reshape(1, 3, 48, 48)
     return image
 
 # 复制图片
@@ -64,7 +65,7 @@ def analyze_result(result_analysis_sim_cls, result_analysis_mid_cls, result_anal
                 shutil.rmtree(tmp)                # 删除现有路径，os.rmdir(tmp)函数只能用于删除空目录
             os.makedirs(tmp)                      # 新建立路径
         image_path_cls = path_tmp + "false/" + str(r_cls) + "/" + images_labels[label_id] + "/" \
-                                            + images_labels[pred_id] + "_" + str(((pred_prob.tolist()*100)//1)/100) + "_.jpg"
+                        + images_labels[pred_id] + "_" + str(((pred_prob.tolist()*100)//1)/100) + "_" + image_path.split("/")[-1]
         copy_image(image_path, image_path_cls)
     if save_images_true and c_cls == 1:           # 保存分类的正确结果
         if result_analysis_mid_cls[r_cls][label_id][c_cls] == 1:
@@ -73,7 +74,7 @@ def analyze_result(result_analysis_sim_cls, result_analysis_mid_cls, result_anal
                 shutil.rmtree(tmp)                # 删除现有路径，os.rmdir(tmp)函数只能用于删除空目录
             os.makedirs(tmp)                      # 新建立路径
         image_path_cls = path_tmp + "true/" + str(r_cls) + "/" + images_labels[label_id] + "/" \
-                                            + images_labels[pred_id] + "_" + str(((pred_prob.tolist()*100)//1)/100) + "_.jpg"
+                        + images_labels[pred_id] + "_" + str(((pred_prob.tolist()*100)//1)/100) + "_" + image_path.split("/")[-1]
         copy_image(image_path, image_path_cls)
 
 ## ————————————————————————————————————————— 打印中间得分分析结果 —————————————————————————————————————————————— ## 
@@ -101,17 +102,20 @@ def print_result(result_analysis_sim_cls, result_analysis_mid_cls, result_analys
 
 
 # 初始化输入参数
-txt_path = "./train.txt"
-model_path = "./checkpoint/pth/ZJC_mobilenetv2-v0.1_20220227-2135_128_1.0_15_0.9312_0.8761.pth"
+txt_path = "./dataset/8cls_13k_2k_80k_9k/test.txt"
+model_path = "./checkpoint/pth2/TSR_JUSHI_8_mobilenetv2-v0.1_20220313-1409_48_1.0_65_0.9995_0.9968.pth"
 save_images_true  = False                                   # 是否保存所有中间的计算图片，针对识别正确的的图片
 save_images_false = True                                   # 是否保存所有中间的计算图片，针对识别错误的的图片
-path_tmp = "./tmp/result_analyze2/"                        # 中间计算图片存储位置
+path_tmp = "./tmp/result_analyze8new/"  # 中间计算图片存储位置
+
+# 删除现有路径
+if os.path.exists(path_tmp): shutil.rmtree(path_tmp)
 
 # 读取图片列表和模型
 images_info_list, images_labels = get_images(txt_path)
-transform = transforms.Compose([transforms.ToTensor(), transforms.Normalize(mean=[0.5], std=[0.5])])
+transform = transforms.Compose([transforms.ToTensor(), transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225])])
 model = torch.load(model_path)
-model.cpu().eval()
+model.cuda().eval()
 
 # 预先定义用于分析识别结果的存储矩阵
 result_analysis_sim_cls = [[0, 0] for _ in range(10)]        # 针对分类网络的数据统计矩阵
@@ -123,7 +127,7 @@ result = {"simple":result_analysis_sim_cls, "middle":result_analysis_mid_cls, "d
 for num, (image_path, label_id) in enumerate(images_info_list):
     image = proc_images(image_path, transform)
     with torch.no_grad():
-        output = torch.squeeze(model(image))
+        output = torch.squeeze(model(image.cuda()).cpu())
         pred_val = torch.softmax(output, dim=0)
         pred_id  = torch.argmax(pred_val).numpy()
         pred_prob = pred_val[pred_id]
