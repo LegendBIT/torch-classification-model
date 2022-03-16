@@ -1,6 +1,6 @@
 # 修改的mobilenetv3的网络模型 https://github.com/WZMIAOMIAO/deep-learning-for-image-processing
 # 权重文件下载 download url: https://download.pytorch.org/models/mobilenet_v3_large-8738ca79.pth
-# 权重文件下载 download url: https://download.pytorch.org/models/mobilenet_v3_large-8738ca79.pth
+# 权重文件下载 download url: https://download.pytorch.org/models/mobilenet_v3_small-047dcff4.pth
 from typing import Callable, List, Optional
 
 import torch
