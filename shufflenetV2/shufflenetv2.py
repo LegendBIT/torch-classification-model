@@ -26,7 +26,7 @@ def channel_shuffle(x: Tensor, groups: int) -> Tensor:
 
     return x
 
-# 模型基本模块，这里名为倒置残差模块，但是其是这里是先缩减通道数，然后维持通道数，不满足倒置残差设计
+# 模型基本模块，这里名为倒置残差模块，但是其实这里是先缩减通道数，然后维持通道数，不满足倒置残差设计
 class InvertedResidual(nn.Module):
     def __init__(self, inp: int, oup: int, stride: int) -> None:
         super().__init__()
