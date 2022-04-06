@@ -1,8 +1,9 @@
-# 可实现迁移学习
+# 公共训练代码，可实现迁移学习
+# 包含label smoothing
 import torch
 import torch.nn as nn
 from torch.utils.tensorboard import SummaryWriter
-from ghost import ghostnet
+from mobilenetv2 import MobileNetV2
 from data_read_and_preprocess import MyDataset, MyDataLoader
 import os
 import shutil
@@ -13,23 +14,20 @@ print("using {} device.".format(device))
 ############################################################################################################
 ## 0. 参数设置 ##############################################################################################
 ############################################################################################################
-IMG_SIZE = 128
-BATCH_SIZE = 32
-CLASS_NUM = 2
-alpha = 1.0           # 模型通道缩放系数
-initial_epochs = 4    # 第一轮仅仅训练最后一层
-second_epochs = 6     # 第二轮训练整个网络
+IMG_SIZE = 48
+BATCH_SIZE = 128
+CLASS_NUM = 8
+alpha = 1.0            # 模型通道缩放系数
+smoothing = 0.1
+initial_epochs = 10    # 第一轮仅仅训练最后一层
+second_epochs = 70     # 第二轮训练整个网络
 initial_learning_rate = 0.0001
 second_learning_rate = 0.00001
-dataset_name = "Data"
-# train_dir = "./train"
-# test_dir = "./test"
-# output_path = "./checkpoint/pth/"
-weight_path = "./checkpoint/state_dict_73.98.pth"
-
-train_dir = "./train"
-test_dir = "./validation"
-output_path = "./"
+dataset_name = "DATA"
+train_dir = "./train.txt"
+test_dir = "./test.txt"
+output_path = "./checkpoint/pth4/"
+weight_path = "./checkpoint/mobilenet_v2-b0353104.pth"
 
 ############################################################################################################
 ## 1. 读取数据和数据预处理 #####################################################################################
@@ -42,22 +40,43 @@ test_loader  = MyDataLoader(dataset=test_dataset, batch_size=BATCH_SIZE, shuffle
 ############################################################################################################
 ## 2. 搭建网络结构 ###########################################################################################
 ############################################################################################################
-model = ghostnet(num_classes=CLASS_NUM, width=alpha)
+model = MobileNetV2(num_classes=CLASS_NUM, alpha=alpha)
 model.to(device)
 #print(model)
 
 ############################################################################################################
 ## 3. 定义损失函数，日志记录器和模型保存函数 ######################################################################
 ############################################################################################################
-cost = torch.nn.CrossEntropyLoss()     # 该损失函数包含softmax操作，所以对应模型中最后一层不含有softmax操作
+# 定义label smoothing函数
+class LabelSmoothing(nn.Module):
+    # NLL loss with label smoothing.
+    def __init__(self, smoothing=0.0):
+        # Constructor for the LabelSmoothing module. :param smoothing: label smoothing factor
+        super(LabelSmoothing, self).__init__()
+        self.confidence = 1.0 - smoothing
+        self.smoothing = smoothing
+        # 此处的self.smoothing即我们的epsilon平滑参数。
+    def forward(self, x, target):
+        logprobs = torch.nn.functional.log_softmax(x, dim=-1)
+        nll_loss = -logprobs.gather(dim=-1, index=target.unsqueeze(1))
+        nll_loss = nll_loss.squeeze(1)
+        smooth_loss = -logprobs.mean(dim=-1)
+        loss = self.confidence * nll_loss + self.smoothing * smooth_loss
+        return loss.mean()
+# 选择是否经过label smoothing
+if smoothing == 0:
+    cost = torch.nn.CrossEntropyLoss()      # 该损失函数包含softmax操作，所以对应模型中最后一层不含有softmax操作
+else:
+    cost = LabelSmoothing(smoothing)
+# 定义日志记录器
 tensorboard_path = "./log"
 if os.path.exists(tensorboard_path): shutil.rmtree(tensorboard_path)
 writer = SummaryWriter(tensorboard_path)
 # 保存模型参数和结构
 def save_model(epoch, acc1, acc2, path, dataset_name, model, alpha):
     localtime = time.strftime("%Y%m%d-%H%M", time.localtime())
-    output_model = path + "{}_ghost-v0.1_{}_{}_{}_{}_{:.4f}_{:.4f}.pth".format(dataset_name, localtime, IMG_SIZE, alpha, epoch, acc1, acc2)
-    torch.save(model, output_model)    # 该保存方式理论上保存了完整的结构和参数，但是实际load时，还是需要同级目录下有模型结构定义脚本
+    output_model = path + "{}_mobilenetv2-v0.1_{}_{}_{}_{}_{:.4f}_{:.4f}.pth".format(dataset_name, localtime, IMG_SIZE, alpha, epoch, acc1, acc2)
+    torch.save(model, output_model)  # 该保存方式理论上保存了完整的结构和参数，但是实际load时，还是需要同级目录下有模型结构定义脚本
 
 ############################################################################################################
 ## 4. 定义训练函数和测试函数 ###################################################################################
@@ -65,6 +84,7 @@ def save_model(epoch, acc1, acc2, path, dataset_name, model, alpha):
 def train(model, train_loader, optimizer, epoch):
     sum_loss = 0.0      # 统计每个epoch的总loss
     train_correct = 0   # 统计每个epoch的correct
+    sum_image = 0       # 统计每个epoch的总图片数
     num = 0
     for inputs, labels in train_loader:
         if str(device).split(":")[0]=="cuda": inputs, labels = inputs.cuda(), labels.cuda()
@@ -76,7 +96,8 @@ def train(model, train_loader, optimizer, epoch):
 
         _, id = torch.max(outputs.data, 1)  # 完整tensor包含数据data,梯度grad,求导记录grad_fn，tensor.data指的就是数据，max函数可以用于完整tensor,也可用于数据
         sum_loss += loss.data               # tensor.item()转换1*1的张量的数据data为fp数值，tensor.cpu().numpy()转换data为ndarray
-        train_correct += torch.sum(id == labels.data)/id.size()[0]  # tensor除了以上数值，还包含一个requires_grad属性
+        train_correct += torch.sum(id == labels.data)  # tensor除了以上数值，还包含一个requires_grad属性
+        sum_image += id.size()[0]
 
         num += 1                       # 上下几行代码中.data和.item()都可以去掉而没有影响，.data返回还是tensor, .item()返回是fp数值
         writer.add_scalar('Train/Lr', optimizer.param_groups[0]['lr'], len(train_loader)*epoch+num)  # 输入数值或者tensor都可以
@@ -84,21 +105,23 @@ def train(model, train_loader, optimizer, epoch):
         writer.add_scalar('Train/Accuracy', torch.sum(id == labels.data).cpu()/id.cpu().numpy().size, len(train_loader)*epoch+num)
         writer.flush()
     
-    return sum_loss, train_correct/len(train_loader)
+    return sum_loss, train_correct/sum_image
 
 def test(model, test_loader):
     model.eval()  # 测试模式，仅用于通知BN层和dropout层当前处于推理模式还是训练模式，不影响梯度计算和反向传播
     with torch.no_grad():  # 放弃梯度记录节省内存，等效于设置requires_grad=False，正向传播时不记录中间层结果，无法进行梯度计算和更新参数
         sum_loss = 0.0
         test_correct = 0
+        sum_image = 0
         for inputs, labels in test_loader:
             if str(device).split(":")[0]=="cuda": inputs, labels = inputs.cuda(), labels.cuda()
             outputs = model(inputs)
             loss = cost(outputs, labels)
             _, id = torch.max(outputs.data, 1)
             sum_loss += loss.data
-            test_correct += torch.sum(id == labels.data)/id.size()[0]
-    return sum_loss, test_correct/len(test_loader)
+            test_correct += torch.sum(id == labels.data)
+            sum_image += id.size()[0]
+    return sum_loss, test_correct/sum_image
 
 ############################################################################################################
 ## 5. 训练神经网络 ###########################################################################################
@@ -117,9 +140,9 @@ pre_dict = {k: v for k, v in pre_weights.items() if model.state_dict()[k].numel(
 missing_keys, unexpected_keys = model.load_state_dict(pre_dict, strict=False)
 
 # 冻结n-2层，方式就是设置层的requires_grad为False, model.named_parameters()是列表不包含BN的滑动均值和方差，仅仅包含可训练的参数
-freeze_list=list(model.state_dict().keys())[0:-2]   # model.state_dict()是有序字典，包含所有参数
-for name, param in model.named_parameters():        # print(model.state_dict()['features.0.1.running_mean'][0:5])
-    if name in freeze_list: param.requires_grad=False
+freeze_list = list(model.state_dict().keys())[0:-2]   # model.state_dict()是有序字典，包含所有参数
+for name, param in model.named_parameters():          # print(model.state_dict()['features.0.1.running_mean'][0:5])
+    if name in freeze_list: param.requires_grad = False
 
 # 预先计算loss和acc
 loss0, acc0 = test(model, test_loader)
@@ -147,7 +170,7 @@ print("middle loss: {:.4f}".format(loss1))
 print("middle accuracy: {:.4f}".format(acc1))
 
 # 解冻所有层
-for name, param in model.named_parameters(): param.requires_grad=True
+for name, param in model.named_parameters(): param.requires_grad = True
 optimizer = torch.optim.Adam(model.parameters(), lr=second_learning_rate)
 
 # 开始第二轮训练
