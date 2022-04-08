@@ -1,16 +1,15 @@
-# 根据别人代码修改的mobilenetv2的网络模型，可实现迁移学习，相比train.py增加了新的训练策略
-# 相比train.py新增了cosLR, 预热，L2正则化
-# 用于训练修改网络结构后的mobilenetv2_4，区别就在于恢复网络权重时需要重新建立命名与数据的关联，见169行
+# 根据别人代码修改的mobilenetv2的网络模型，可实现迁移学习
+# 用于训练alpha不等于1的模型，通过修改模型结构实现，修改卷积结构的最终输出层固定为1280，而不是受alpha影响
+# 本代码相比train.py的区别是恢复网络权重时，不能通过名称关联而是通过顺序和尺寸关联
+# 没有加label smoothing
 import torch
 import torch.nn as nn
 from torch.utils.tensorboard import SummaryWriter
-from mobilenetv2_4 import MobileNetV2
+from mobilenetv2_2 import MobileNetV2
 from data_read_and_preprocess import MyDataset, MyDataLoader
 import os
 import shutil
 import time
-import math
-
 
 device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 print("using {} device.".format(device))
@@ -20,19 +19,16 @@ print("using {} device.".format(device))
 IMG_SIZE = 48
 BATCH_SIZE = 128
 CLASS_NUM = 8
-alpha = 1.0                      # 模型通道缩放系数
-smoothing = 0.1
-l2_weight_decay = 0.0001         # L2正则化 0.0001
-initial_epochs = 10              # 第一轮仅仅训练最后一层，如果不想要迁移学习，直接设定initial_epochs=0并使用second_learning_rate
-second_epochs = 70               # 第二轮训练整个网络
+alpha = 0.50           # 模型通道缩放系数
+initial_epochs = 10    # 第一轮仅仅训练最后一层
+second_epochs = 60     # 第二轮训练整个网络
 initial_learning_rate = 0.0001
-second_learning_rate = 0.000001  # 当采用两阶段学习率下降时建议取0.00001
-is_cos_lr = True
-dataset_name = "DATA"
+second_learning_rate = 0.00001
+dataset_name = "TSR_JUSHI_8"
 train_dir = "./train.txt"
 test_dir = "./test.txt"
-output_path = "./checkpoint/pth4/"
-weight_path = "./checkpoint/mobilenet_v2-b0353104.pth"
+output_path = "./checkpoint/pth2/"
+weight_path = "./checkpoint/mobilenetv2_0.5-eaa6f9ad.pth" # 非官方权重，官方没有0.75的权重，所以命名方式不一样，需要调整命名，甚至修改模型结构
 
 ############################################################################################################
 ## 1. 读取数据和数据预处理 #####################################################################################
@@ -45,76 +41,34 @@ test_loader  = MyDataLoader(dataset=test_dataset, batch_size=BATCH_SIZE, shuffle
 ############################################################################################################
 ## 2. 搭建网络结构 ###########################################################################################
 ############################################################################################################
-model = MobileNetV2(size_image=IMG_SIZE, num_classes=CLASS_NUM, alpha=alpha)
+model = MobileNetV2(num_classes=CLASS_NUM, alpha=alpha)
 model.to(device)
-# print(model)
+#print(model)
 
 ############################################################################################################
-## 3. 定义学习率修改函数、损失函数，日志记录器和模型保存函数 ########################################################
+## 3. 定义损失函数，日志记录器和模型保存函数 ######################################################################
 ############################################################################################################
-## 定义学习率修改函数
-initial_steps, second_steps  = initial_epochs * len(train_loader), second_epochs * len(train_loader)
-total_steps = initial_steps + second_steps
-warmup_steps = 2 * len(train_loader)
-def change_learningrate(global_steps):
-    if global_steps <= warmup_steps:                # 热身学习率，线性增加直至initial_learning_rate
-        lr = global_steps / warmup_steps * initial_learning_rate
-    else:                                           # 热身结束，选择cos学习率变化还是选择两阶段学习率变化
-        if is_cos_lr:
-            lr = second_learning_rate + 0.5 * (initial_learning_rate - second_learning_rate) * \
-                    (1 + math.cos((global_steps - warmup_steps) / (total_steps - warmup_steps) * math.pi))
-        else:
-            if global_steps <= initial_steps:
-                lr = initial_learning_rate
-            else:
-                lr = second_learning_rate           # 不管是cos变化还是两阶段变化，都是起于initial_learning_rate止于second_learning_rate
-    return lr
-
-## 定义损失函数
-# 定义label smoothing函数
-class LabelSmoothing(nn.Module):
-    # NLL loss with label smoothing.
-    def __init__(self, smoothing=0.0):
-        # Constructor for the LabelSmoothing module. :param smoothing: label smoothing factor
-        super(LabelSmoothing, self).__init__()
-        self.confidence = 1.0 - smoothing
-        self.smoothing = smoothing
-        # 此处的self.smoothing即我们的epsilon平滑参数。
-    def forward(self, x, target):
-        logprobs = torch.nn.functional.log_softmax(x, dim=-1)
-        nll_loss = -logprobs.gather(dim=-1, index=target.unsqueeze(1))
-        nll_loss = nll_loss.squeeze(1)
-        smooth_loss = -logprobs.mean(dim=-1)
-        loss = self.confidence * nll_loss + self.smoothing * smooth_loss
-        return loss.mean()
-# 选择是否经过label smoothing
-if smoothing == 0:
-    cost = torch.nn.CrossEntropyLoss()      # 该损失函数包含softmax操作，所以对应模型中最后一层不含有softmax操作
-else:
-    cost = LabelSmoothing(smoothing)
-
-## 定义日志记录器
+cost = torch.nn.CrossEntropyLoss()      # 该损失函数包含softmax操作，所以对应模型中最后一层不含有softmax操作
 tensorboard_path = "./log"
 if os.path.exists(tensorboard_path): shutil.rmtree(tensorboard_path)
 writer = SummaryWriter(tensorboard_path)
-
-## 保存模型参数和结构
+# 保存模型参数和结构
 def save_model(epoch, acc1, acc2, path, dataset_name, model, alpha):
     localtime = time.strftime("%Y%m%d-%H%M", time.localtime())
     output_model = path + "{}_mobilenetv2-v0.1_{}_{}_{}_{}_{:.4f}_{:.4f}.pth".format(dataset_name, localtime, IMG_SIZE, alpha, epoch, acc1, acc2)
     torch.save(model, output_model)  # 该保存方式理论上保存了完整的结构和参数，但是实际load时，还是需要同级目录下有模型结构定义脚本
+    return output_model
 
 ############################################################################################################
 ## 4. 定义训练函数和测试函数 ###################################################################################
 ############################################################################################################
 def train(model, train_loader, optimizer, epoch):
-    sum_loss = 0.0        # 统计每个epoch的总loss
-    train_correct = 0.0   # 统计每个epoch的correct的数量
-    sum_image = 0         # 统计每个epoch的总图片数
-    for steps, (inputs, labels) in enumerate(train_loader):
-        global_steps = epoch * len(train_loader) + steps + 1
+    sum_loss = 0.0      # 统计每个epoch的总loss
+    train_correct = 0   # 统计每个epoch的correct
+    sum_image = 0       # 统计每个epoch的总图片数
+    num = 0
+    for inputs, labels in train_loader:
         if str(device).split(":")[0]=="cuda": inputs, labels = inputs.cuda(), labels.cuda()
-        optimizer.param_groups[0]["lr"] = change_learningrate(global_steps)  # 更改学习率
         optimizer.zero_grad()          # 清空梯度
         outputs = model(inputs)        # 计算输出，并缓存中间每层输出
         loss = cost(outputs, labels)   # 计算损失
@@ -124,14 +78,15 @@ def train(model, train_loader, optimizer, epoch):
         _, id = torch.max(outputs.data, 1)  # 完整tensor包含数据data,梯度grad,求导记录grad_fn，tensor.data指的就是数据，max函数可以用于完整tensor,也可用于数据
         sum_loss += loss.data               # tensor.item()转换1*1的张量的数据data为fp数值，tensor.cpu().numpy()转换data为ndarray
         train_correct += torch.sum(id == labels.data)  # tensor除了以上数值，还包含一个requires_grad属性
-        sum_image += id.size()[0]           # 上下几行代码中.data和.item()都可以去掉而没有影响，.data返回还是tensor, .item()返回是fp数值 
+        sum_image += id.size()[0]
 
-        writer.add_scalar('Train/Lr', optimizer.param_groups[0]['lr'], global_steps)  # 输入数值或者tensor都可以
-        writer.add_scalar('Train/Loss', loss.item(), global_steps)      # tensor.item()会自动将数据从GPU移动到CPU
-        writer.add_scalar('Train/Accuracy', torch.sum(id == labels.data).cpu()/id.cpu().numpy().size, global_steps)
+        num += 1                       # 上下几行代码中.data和.item()都可以去掉而没有影响，.data返回还是tensor, .item()返回是fp数值
+        writer.add_scalar('Train/Lr', optimizer.param_groups[0]['lr'], len(train_loader)*epoch+num)  # 输入数值或者tensor都可以
+        writer.add_scalar('Train/Loss', loss.item(), len(train_loader)*epoch+num)      # tensor.item()会自动将数据从GPU移动到CPU
+        writer.add_scalar('Train/Accuracy', torch.sum(id == labels.data).cpu()/id.cpu().numpy().size, len(train_loader)*epoch+num)
         writer.flush()
     
-    return sum_loss, train_correct/sum_image  # 返回值都是tensor类型
+    return sum_loss/len(train_dataset), train_correct/sum_image
 
 def test(model, test_loader):
     model.eval()  # 测试模式，仅用于通知BN层和dropout层当前处于推理模式还是训练模式，不影响梯度计算和反向传播
@@ -147,7 +102,7 @@ def test(model, test_loader):
             sum_loss += loss.data
             test_correct += torch.sum(id == labels.data)
             sum_image += id.size()[0]
-    return sum_loss, test_correct/sum_image
+    return sum_loss/len(test_dataset), test_correct/sum_image
 
 ############################################################################################################
 ## 5. 训练神经网络 ###########################################################################################
@@ -157,45 +112,32 @@ def freeze_bn(m):
     if isinstance(m, nn.BatchNorm2d): m.eval() 
 # model.apply(freeze_bn)
 
-# 选择是否迁移学习
-if initial_epochs != 0:
-    print("train model from : '%s'" % weight_path)
-    print("")
+# 读取权重文件，读取为有序字典的形式
+assert os.path.exists(weight_path), "file {} dose not exist.".format(weight_path)
+pre_weights = torch.load(weight_path, map_location=device)
 
-    # 读取权重文件，读取为有序字典的形式
-    assert os.path.exists(weight_path), "file {} dose not exist.".format(weight_path)
-    pre_weights = torch.load(weight_path, map_location=device)
+# 结合权重文件和模型文件，切记权重文件与模型文件命名方式不一致，最后一个卷积层层数有可能不一样
+assert(len(pre_weights.keys())==len(model.state_dict().keys()))
+pre_dict = {}
+for n in range(len(model.state_dict().keys())):
+    k = list(model.state_dict().keys())[n]
+    kk = list(pre_weights.keys())[n]
+    if model.state_dict()[k].numel() == pre_weights[kk].numel():
+        pre_dict[k] = pre_weights[kk]
+    else:
+        print("%s(%s) <--- %s(%s)" % (k, model.state_dict()[k].numel(), kk, pre_weights[kk].numel()))
 
-    # 如果最后一层的类别数量相同，则恢复整个模型的权重，如果不相等，则只是恢复前n-1层的权重
-    pre_dict = {}
-    for k, v in pre_weights.items():
-        name = k.split(".")
-        if name[0] == "features":
-            if int(name[1]) < 2:
-                name[0] = "features1"
-                k = ".".join(name)
-            else:
-                name[0] = "features2"
-                name[1] = str(int(name[1]) - 2)
-                k = ".".join(name) 
-        if model.state_dict()[k].numel() == v.numel():
-            pre_dict[k] = v 
-        else:
-            print("missing weight --- %s" % k)
+print("自定义模型参数量：%d" % len(model.state_dict().keys()))
+print("导入的模型参数量：%d" % len(pre_weights.keys()))
+print("匹配的模型参数量：%d" % len(pre_dict.keys()))
 
-    missing_keys, unexpected_keys = model.load_state_dict(pre_dict, strict=False)
-    print("missing_keys --- %s" % missing_keys)
-    print("unexpected_keys --- %s" % unexpected_keys)
-    print("")
+# 恢复权重，本文件针对alpha小于1时的情况，且修改了模型结构，所以能恢复0 ~ n-2层的权重，故接下来冻结0 ~ -2层
+missing_keys, unexpected_keys = model.load_state_dict(pre_dict, strict=False)
 
-    # 冻结n-2层，方式就是设置层的requires_grad为False, model.named_parameters()是列表不包含BN的滑动均值和方差，仅仅包含可训练的参数
-    freeze_list=list(model.state_dict().keys())[0:-2]   # model.state_dict()是有序字典，包含所有参数
-    for name, param in model.named_parameters():        # print(model.state_dict()['features.0.1.running_mean'][0:5])
-        if name in freeze_list: param.requires_grad=False
-
-else:
-    print("train model from scratch")
-    print("")
+# 冻结n-2层，方式就是设置层的requires_grad为False, model.named_parameters()是列表不包含BN的滑动均值和方差，仅仅包含可训练的参数
+freeze_list=list(model.state_dict().keys())[0:-2]   # model.state_dict()是有序字典，包含所有参数
+for name, param in model.named_parameters():        # print(model.state_dict()['features.0.1.running_mean'][0:5])
+    if name in freeze_list: param.requires_grad=False
 
 # 预先计算loss和acc
 loss0, acc0 = test(model, test_loader)
@@ -205,15 +147,19 @@ print("")
 
 # 选择需要训练的参数，其实只要设置了requires_grad属性为false，即使选择所有参数可训练，也不会更新参数了，但是下面写法更科学
 params = [p for p in model.parameters() if p.requires_grad]
-optimizer = torch.optim.Adam(params, lr=initial_learning_rate, weight_decay=l2_weight_decay)
+optimizer = torch.optim.Adam(params, lr=initial_learning_rate)  # 优化器和损失函数不需要tocuda()
+# optimizer.param_groups[0]['lr'] = initial_learning_rate   # 更改学习率
 
 # 第一轮训练
+val_acc_list, val_acc_dict = [], {}
 for epoch in range(initial_epochs) :
     model.train()
-    if initial_epochs != 0: model.apply(freeze_bn)     # 因为是迁移学习，所以选择冻结BN层的滑动均值和滑动方差
+    model.apply(freeze_bn)   # 因为是迁移学习，所以选择冻结BN层的滑动均值和滑动方差
     loss, acc = train(model, train_loader, optimizer, epoch)
     val_loss, val_acc = test(model, test_loader)
-    save_model(epoch+1, acc, val_acc, "./tmp/", dataset_name, model, alpha)
+    model_name = save_model(epoch+1, acc, val_acc, "./tmp/", dataset_name, model, alpha)
+    val_acc_list.append(val_acc)
+    val_acc_dict[epoch] = model_name
     print("epoch: %d, loss: %0.5f, acc: %0.4f, val_loss: %0.5f, val_acc: %0.4f" % (epoch+1, loss, acc, val_loss, val_acc))
     print("")
 
@@ -221,18 +167,21 @@ for epoch in range(initial_epochs) :
 loss1, acc1 = test(model, test_loader)
 print("middle loss: {:.4f}".format(loss1))
 print("middle accuracy: {:.4f}".format(acc1))
+print("")
 
 # 解冻所有层
-for name, param in model.named_parameters(): param.requires_grad = True
+for name, param in model.named_parameters(): param.requires_grad=True
 optimizer = torch.optim.Adam(model.parameters(), lr=second_learning_rate)
 
 # 开始第二轮训练
 for epoch in range(initial_epochs, initial_epochs+second_epochs) :
     model.train()
-    if initial_epochs != 0: model.apply(freeze_bn)
+    model.apply(freeze_bn)
     loss, acc = train(model, train_loader, optimizer, epoch)
     val_loss, val_acc = test(model, test_loader)
-    save_model(epoch+1, acc, val_acc, "./tmp/", dataset_name, model, alpha)
+    model_name = save_model(epoch+1, acc, val_acc, "./tmp/", dataset_name, model, alpha)
+    val_acc_list.append(val_acc)
+    val_acc_dict[epoch] = model_name
     print("epoch: %d, loss: %0.5f, acc: %0.4f, val_loss: %0.5f, val_acc: %0.4f" % (epoch+1, loss, acc, val_loss, val_acc))
     print("")
 
@@ -241,8 +190,8 @@ loss2, acc2 = test(model, test_loader)
 print("last loss: {:.4f}".format(loss2))
 print("last accuracy: {:.4f}".format(acc2))
 
-# 保存模型参数和结构
-save_model(initial_epochs+second_epochs, acc, acc2, output_path, dataset_name, model, alpha)
+# 保存模型参数和结构，挑选acc最大值保存
+shutil.copy(val_acc_dict[val_acc_list.index(max(val_acc_list))], output_path)
 
 
 # 6. 遍历模型
