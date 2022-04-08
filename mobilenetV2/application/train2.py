@@ -26,9 +26,9 @@ second_epochs = 60     # 第二轮训练整个网络
 initial_learning_rate = 0.0001
 second_learning_rate = 0.00001
 dataset_name = "TSR_JUSHI_8"
-train_dir = "/nfs/cache-902-2/xiawenze/TraficSignClassification/dataset/8cls_13k_2k_80k_9k/train.txt"
-test_dir = "/nfs/cache-902-2/xiawenze/TraficSignClassification/dataset/8cls_13k_2k_80k_9k/test.txt"
-output_path = "/nfs/cache-902-2/xiawenze/TraficSignClassification/checkpoint/pth2/"
+train_dir = "./train.txt"
+test_dir = "./test.txt"
+output_path = "./checkpoint/pth2/"
 weight_path = "./checkpoint/mobilenetv2_0.35-b2e15951.pth" # 非官方权重，官方没有0.75的权重，所以命名方式不一样，需要调整命名，甚至修改模型结构
 
 ############################################################################################################
