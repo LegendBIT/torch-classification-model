@@ -127,7 +127,7 @@ class Regularization(torch.nn.Module):
                 reg_loss = reg_loss + l2_reg
             return weight_decay*reg_loss
         else:
-            return 0
+            return torch.tensor(0)
     # 计算正则化loss
     def forward(self, model):
         self.weight_list = self.get_weight(model)    # 获得最新的权重
