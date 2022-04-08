@@ -25,10 +25,10 @@ initial_epochs = 10    # 第一轮仅仅训练最后一层
 second_epochs = 60     # 第二轮训练整个网络
 initial_learning_rate = 0.0001
 second_learning_rate = 0.00001
-dataset_name = "DATA"
-train_dir = "./train.txt"
-test_dir = "./test.txt"
-output_path = "./checkpoint/pth2/"
+dataset_name = "TSR_JUSHI_8"
+train_dir = "/nfs/cache-902-2/xiawenze/TraficSignClassification/dataset/8cls_13k_2k_80k_9k/train.txt"
+test_dir = "/nfs/cache-902-2/xiawenze/TraficSignClassification/dataset/8cls_13k_2k_80k_9k/test.txt"
+output_path = "/nfs/cache-902-2/xiawenze/TraficSignClassification/checkpoint/pth2/"
 weight_path = "./checkpoint/mobilenetv2_0.35-b2e15951.pth" # 非官方权重，官方没有0.75的权重，所以命名方式不一样，需要调整命名，甚至修改模型结构
 
 ############################################################################################################
@@ -58,6 +58,7 @@ def save_model(epoch, acc1, acc2, path, dataset_name, model, alpha):
     localtime = time.strftime("%Y%m%d-%H%M", time.localtime())
     output_model = path + "{}_mobilenetv2-v0.1_{}_{}_{}_{}_{:.4f}_{:.4f}.pth".format(dataset_name, localtime, IMG_SIZE, alpha, epoch, acc1, acc2)
     torch.save(model, output_model)  # 该保存方式理论上保存了完整的结构和参数，但是实际load时，还是需要同级目录下有模型结构定义脚本
+    return output_model
 
 ############################################################################################################
 ## 4. 定义训练函数和测试函数 ###################################################################################
@@ -86,7 +87,7 @@ def train(model, train_loader, optimizer, epoch):
         writer.add_scalar('Train/Accuracy', torch.sum(id == labels.data).cpu()/id.cpu().numpy().size, len(train_loader)*epoch+num)
         writer.flush()
     
-    return sum_loss, train_correct/sum_image
+    return sum_loss/len(train_dataset), train_correct/sum_image
 
 def test(model, test_loader):
     model.eval()  # 测试模式，仅用于通知BN层和dropout层当前处于推理模式还是训练模式，不影响梯度计算和反向传播
@@ -102,7 +103,7 @@ def test(model, test_loader):
             sum_loss += loss.data
             test_correct += torch.sum(id == labels.data)
             sum_image += id.size()[0]
-    return sum_loss, test_correct/sum_image
+    return sum_loss/len(test_dataset), test_correct/sum_image
 
 ############################################################################################################
 ## 5. 训练神经网络 ###########################################################################################
@@ -143,19 +144,23 @@ for name, param in model.named_parameters():        # print(model.state_dict()['
 loss0, acc0 = test(model, test_loader)
 print("initial loss: {:.4f}".format(loss0))
 print("initial accuracy: {:.4f}".format(acc0))
+print("")
 
 # 选择需要训练的参数，其实只要设置了requires_grad属性为false，即使选择所有参数可训练，也不会更新参数了，但是下面写法更科学
 params = [p for p in model.parameters() if p.requires_grad]
-optimizer = torch.optim.Adam(params, lr=initial_learning_rate)
+optimizer = torch.optim.Adam(params, lr=initial_learning_rate)  # 优化器和损失函数不需要tocuda()
 # optimizer.param_groups[0]['lr'] = initial_learning_rate   # 更改学习率
 
 # 第一轮训练
+val_acc_list, val_acc_dict = [], {}
 for epoch in range(initial_epochs) :
     model.train()
     model.apply(freeze_bn)   # 因为是迁移学习，所以选择冻结BN层的滑动均值和滑动方差
     loss, acc = train(model, train_loader, optimizer, epoch)
     val_loss, val_acc = test(model, test_loader)
-    save_model(epoch+1, acc, val_acc, "./tmp/", dataset_name, model, alpha)
+    model_name = save_model(epoch+1, acc, val_acc, "./tmp/", dataset_name, model, alpha)
+    val_acc_list.append(val_acc)
+    val_acc_dict[epoch] = model_name
     print("epoch: %d, loss: %0.5f, acc: %0.4f, val_loss: %0.5f, val_acc: %0.4f" % (epoch+1, loss, acc, val_loss, val_acc))
     print("")
 
@@ -163,6 +168,7 @@ for epoch in range(initial_epochs) :
 loss1, acc1 = test(model, test_loader)
 print("middle loss: {:.4f}".format(loss1))
 print("middle accuracy: {:.4f}".format(acc1))
+print("")
 
 # 解冻所有层
 for name, param in model.named_parameters(): param.requires_grad=True
@@ -174,7 +180,9 @@ for epoch in range(initial_epochs, initial_epochs+second_epochs) :
     model.apply(freeze_bn)
     loss, acc = train(model, train_loader, optimizer, epoch)
     val_loss, val_acc = test(model, test_loader)
-    save_model(epoch+1, acc, val_acc, "./tmp/", dataset_name, model, alpha)
+    model_name = save_model(epoch+1, acc, val_acc, "./tmp/", dataset_name, model, alpha)
+    val_acc_list.append(val_acc)
+    val_acc_dict[epoch] = model_name
     print("epoch: %d, loss: %0.5f, acc: %0.4f, val_loss: %0.5f, val_acc: %0.4f" % (epoch+1, loss, acc, val_loss, val_acc))
     print("")
 
@@ -183,8 +191,8 @@ loss2, acc2 = test(model, test_loader)
 print("last loss: {:.4f}".format(loss2))
 print("last accuracy: {:.4f}".format(acc2))
 
-# 保存模型参数和结构
-save_model(initial_epochs+second_epochs, acc, acc2, output_path, dataset_name, model, alpha)
+# 保存模型参数和结构，挑选acc最大值保存
+shutil.copy(val_acc_dict[val_acc_list.index(max(val_acc_list))], output_path)
 
 
 # 6. 遍历模型
