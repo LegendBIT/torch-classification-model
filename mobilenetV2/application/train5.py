@@ -46,7 +46,7 @@ test_loader  = MyDataLoader(dataset=test_dataset, batch_size=BATCH_SIZE, shuffle
 ############################################################################################################
 ## 2. 搭建网络结构 ###########################################################################################
 ############################################################################################################
-model = MobileNetV2(num_classes=CLASS_NUM, alpha=alpha)
+model = MobileNetV2(size_image=IMG_SIZE, num_classes=CLASS_NUM, alpha=alpha)
 model.to(device)
 # print(model)
 
