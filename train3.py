@@ -1,4 +1,4 @@
-# 公共训练函数3，相比train.py新增了cosLR, 预热，L2正则化; 相比train4.py修改了L2正则化的实现方式，修改为自定义的实现方式
+# 公共训练函数3，相比train.py新增了cosLR, 预热，L2正则化; 相比train2.py修改了L2正则化的实现方式，修改为自定义的实现方式
 # 官方自带的L2正则化实现方式存在问题，其将所有可训练参数均进行了正则化，实际上我们并不需要对bias和BN层进行正则化
 import torch
 import torch.nn as nn
