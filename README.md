@@ -12,6 +12,12 @@
 ## shufflenetV2
 实现了基于torch的shufflenetV2模型的定义
 
+## densenet
+实现了基于torch的shufflenetV2模型的定义
+
+## convnext
+实现了基于torch的shufflenetV2模型的定义
+
 ## train.py是公共训练函数
 
 ## validate.py是公共测试函数
